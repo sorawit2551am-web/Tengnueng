@@ -1,64 +1,133 @@
-// นำเข้า NextResponse จาก next/server เพื่อใช้จัดการและส่งค่า HTTP Response กลับไปยังไคลเอนต์
-import { NextResponse } from "next/server";
 
-//================================================================================
-// GET Function (/src/app/api/users/route.js)
-//================================================================================
-/**
- * Route Handler สำหรับ HTTP Method: GET
- * ทำหน้าที่รองรับ Request แบบ GET ที่เข้ามายัง Endpoint นี้
- */
+import { NextResponse } from 'next/server';
+import db from '../../lib/db.js';
+
+// GET: ดูข้อมูลผู้ใช้ทั้งหมด
 export async function GET() {
   try {
-    // พิมพ์ Log ข้อความลงในฝั่งเซิร์ฟเวอร์ (Server Console) เพื่อใช้ในการ Monitor หรือ Debug
-    console.log({ success: true, message: "ดึงข้อมูลผู้ใช้สำเร็จ", status: 200 });
+    // ตรวจสอบ Database
+    console.log('DB object:', typeof db);
+    console.log('DB query:', typeof db.query);
 
-    // ส่ง Response กลับไปยังฝั่ง Client ในรูปแบบ JSON
-    // - Argument แรก: ข้อมูล Body ที่ต้องการส่งกลับไป
-    // - Argument ที่สอง: การตั้งค่า HTTP Status Code (200 OK)
-    return NextResponse.json(
-      {
-        success: true,
-        message: "ดึงข้อมูลผู้ใช้สำเร็จ",
-      },
-      { status: 200 }
+    const [rows] = await db.query(
+      'SELECT id, username FROM tbl_users'
     );
-  } catch (error) {
-    // ดักจับ Error ที่อาจเกิดขึ้นระหว่างการทำงานใน try block
-    // พร้อมส่ง HTTP Response แจ้งเตือนข้อผิดพลาดกลับไปยัง Client ด้วย Status 500 (Internal Server Error)
+
+    return NextResponse.json({
+      status: 'ok',
+      total: rows.length,
+      data: rows,
+    }, { status: 200 });
+
+  } catch (err) {
+    console.error('GET Error:', err);
+
     return NextResponse.json(
-      {
-        success: false,
-        message: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์",
-        // ตรวจสอบ Type ของ error:
-        // หาก error เป็น Instance ของ Error object จะดึง error.message มาใช้งาน
-        // แต่ถ้าไม่ใช่ ให้ fallback เป็นข้อความเริ่มต้น "Internal Server Error"
-        error: error instanceof Error ? error.message : "Internal Server Error",
-      },
+      { status: 'error', error: err.message },
       { status: 500 }
     );
   }
 }
-//================================================================================
-// POST Function (/src/app/api/users/route.js)
-//================================================================================
-export async function POST() {
+
+// POST: เพิ่มผู้ใช้
+export async function POST(request) {
   try {
-    console.log({ success: true, message: "เพิ่มข้อมูลผู้ใช้สำเร็จ", status: 201 });
-    return NextResponse.json(
-      {
-        success: true,
-        message: "เพิ่มข้อมูลผู้ใช้สำเร็จ",
-      },
-      { status: 201 }
+    const body = await request.json();
+
+    const { username, password } = body;
+
+    if (!username || !password) {
+      return NextResponse.json(
+        { error: 'กรุณากรอก username และ password' },
+        { status: 400 }
+      );
+    }
+
+    const [result] = await db.query(
+      'INSERT INTO tbl_users (username, password) VALUES (?, ?)',
+      [username.trim(), password]
     );
-  } catch (error) {
+
+    return NextResponse.json({
+      status: 'ok',
+      message: 'เพิ่มผู้ใช้สำเร็จ',
+      id: result.insertId,
+    }, { status: 201 });
+
+  } catch (err) {
+    console.error('POST Error:', err);
+
+    if (err.code === 'ER_DUP_ENTRY') {
+      return NextResponse.json(
+        { error: 'Username นี้มีอยู่แล้ว' },
+        { status: 409 }
+      );
+    }
+
     return NextResponse.json(
-      {
-        success: false,
-        message: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์",
-        error: error instanceof Error ? error.message : "Internal Server Error",
-      },
+      { status: 'error', error: err.message },
+      { status: 500 }
+    );
+  }
+}
+
+// PUT: แก้ไขข้อมูลผู้ใช้
+export async function PUT(request) {
+  try {
+    const body = await request.json();
+
+    const { id, username, password } = body;
+
+    if (!id || !Number.isInteger(Number(id)) ||
+        Number(id) <= 0 || !username?.trim()) {
+      return NextResponse.json(
+        { error: 'กรุณาระบุ id และ username ให้ถูกต้อง' },
+        { status: 400 }
+      );
+    }
+
+    let result;
+
+    if (password) {
+      [result] = await db.query(
+        `UPDATE tbl_users
+         SET username = ?, password = ?
+         WHERE id = ?`,
+        [username.trim(), password, Number(id)]
+      );
+    } else {
+      [result] = await db.query(
+        `UPDATE tbl_users
+         SET username = ?
+         WHERE id = ?`,
+        [username.trim(), Number(id)]
+      );
+    }
+
+    if (result.affectedRows === 0) {
+      const [rows] = await db.query(
+        'SELECT id FROM tbl_users WHERE id = ?',
+        [Number(id)]
+      );
+
+      if (rows.length === 0) {
+        return NextResponse.json(
+          { error: 'ไม่พบผู้ใช้ที่ต้องการแก้ไข' },
+          { status: 404 }
+        );
+      }
+    }
+
+    return NextResponse.json({
+      status: 'ok',
+      message: 'แก้ไขข้อมูลผู้ใช้สำเร็จ',
+    }, { status: 200 });
+
+  } catch (err) {
+    console.error('PUT Error:', err);
+
+    return NextResponse.json(
+      { status: 'error', error: err.message },
       { status: 500 }
     );
   }

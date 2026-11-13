@@ -1,141 +1,170 @@
-import { NextResponse } from "next/server";
 
-//================================================================================
-// GET Function (ดึงข้อมูลตาม ID)
-//================================================================================
-export async function GET(request, { params }) {
+import { NextResponse } from 'next/server';
+import bcrypt from 'bcryptjs';
+import db from '../../../../lib/db.js';
+
+// ฟังก์ชันตรวจสอบ JSON
+async function getBody(request) {
   try {
-    const { id } = await params; // ดึงค่า ID จาก URL (เช่น 22)
-    console.log({ success: true, message: `ดึงข้อมูลผู้ใช้ ID: ${id} สำเร็จ`, status: 200 });
-
-    return NextResponse.json(
-      {
-        success: true,
-        message: `ดึงข้อมูลผู้ใช้ ID: ${id} สำเร็จ`,
-        userId: id,
-      },
-      { status: 200 }
-    );
-  } catch (error) {
-    return NextResponse.json(
-      {
-        success: false,
-        message: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์",
-        error: error instanceof Error ? error.message : "Internal Server Error",
-      },
-      { status: 500 }
-    );
+    return await request.json();
+  } catch {
+    return null;
   }
 }
 
-//================================================================================
-// POST Function (สร้าง/เพิ่มข้อมูล)
-//================================================================================
-export async function POST(request, { params }) {
+// GET: แสดงข้อมูลผู้ใช้ทั้งหมด
+export async function GET() {
   try {
-    const { id } = await params;
-    const body = await request.json().catch(() => ({})); // รองรับกรณีส่ง Body มาด้วย
-    
-    console.log({ success: true, message: `เพิ่มข้อมูลสำหรับผู้ใช้ ID: ${id} สำเร็จ`, status: 201 });
+    const [rows] = await db.query(
+      'SELECT id, username FROM tbl_users ORDER BY id DESC'
+    );
 
-    return NextResponse.json(
-      {
-        success: true,
-        message: `เพิ่มข้อมูลสำหรับผู้ใช้ ID: ${id} สำเร็จ`,
-        data: body,
-      },
-      { status: 201 }
-    );
-  } catch (error) {
-    return NextResponse.json(
-      {
-        success: false,
-        message: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์",
-        error: error instanceof Error ? error.message : "Internal Server Error",
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      status: 'ok',
+      total: rows.length,
+      data: rows
+    }, { status: 200 });
+
+  } catch (err) {
+    console.error('GET Error:', err);
+
+    return NextResponse.json({
+      status: 'error',
+      message: 'ไม่สามารถดึงข้อมูลผู้ใช้ได้'
+    }, { status: 500 });
   }
 }
 
-//================================================================================
-// PUT Function (แก้ไขข้อมูลทั้งหมด)
-//================================================================================
-export async function PUT(request, { params }) {
+// POST: เพิ่มผู้ใช้ใหม่
+export async function POST(request) {
   try {
-    const { id } = await params;
-    const body = await request.json().catch(() => ({}));
+    const body = await getBody(request);
 
-    return NextResponse.json(
-      {
-        success: true,
-        message: `แก้ไขข้อมูลทั้งหมดของ User ID: ${id} สำเร็จ`,
-        data: body,
-      },
-      { status: 200 }
+    if (!body) {
+      return NextResponse.json({
+        message: 'รูปแบบ JSON ไม่ถูกต้อง'
+      }, { status: 400 });
+    }
+
+    const username = body.username?.trim();
+    const password = body.password;
+
+    if (!username || !password) {
+      return NextResponse.json({
+        message: 'กรุณากรอก username และ password'
+      }, { status: 400 });
+    }
+
+    // เข้ารหัสรหัสผ่าน
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const [result] = await db.query(
+      `INSERT INTO tbl_users (username, password)
+       VALUES (?, ?)`,
+      [username, hashedPassword]
     );
-  } catch (error) {
-    return NextResponse.json(
-      {
-        success: false,
-        message: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์",
-        error: error instanceof Error ? error.message : "Internal Server Error",
-      },
-      { status: 500 }
-    );
+
+    return NextResponse.json({
+      status: 'ok',
+      message: 'เพิ่มผู้ใช้สำเร็จ',
+      id: result.insertId
+    }, { status: 201 });
+
+  } catch (err) {
+    console.error('POST Error:', err);
+
+    if (err.code === 'ER_DUP_ENTRY') {
+      return NextResponse.json({
+        message: 'Username นี้มีอยู่ในระบบแล้ว'
+      }, { status: 409 });
+    }
+
+    return NextResponse.json({
+      status: 'error',
+      message: 'ไม่สามารถเพิ่มผู้ใช้ได้'
+    }, { status: 500 });
   }
 }
 
-//================================================================================
-// PATCH Function (แก้ไขข้อมูลบางส่วน)
-//================================================================================
-export async function PATCH(request, { params }) {
+// PUT: แก้ไขข้อมูลผู้ใช้
+export async function PUT(request) {
   try {
-    const { id } = await params;
-    const body = await request.json().catch(() => ({}));
+    const body = await getBody(request);
 
-    return NextResponse.json(
-      {
-        success: true,
-        message: `อัปเดตข้อมูลบางส่วนของ User ID: ${id} สำเร็จ`,
-        data: body,
-      },
-      { status: 200 }
-    );
-  } catch (error) {
-    return NextResponse.json(
-      {
-        success: false,
-        message: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์",
-        error: error instanceof Error ? error.message : "Internal Server Error",
-      },
-      { status: 500 }
-    );
-  }
-}
+    if (!body) {
+      return NextResponse.json({
+        message: 'รูปแบบ JSON ไม่ถูกต้อง'
+      }, { status: 400 });
+    }
 
-//================================================================================
-// DELETE Function (ลบข้อมูล)
-//================================================================================
-export async function DELETE(request, { params }) {
-  try {
-    const { id } = await params;
+    const { id, password } = body;
+    const username = body.username?.trim();
 
-    return NextResponse.json(
-      {
-        success: true,
-        message: `ลบผู้ใช้ ID: ${id} สำเร็จ`,
-      },
-      { status: 200 }
+    if (!id || !Number.isInteger(Number(id)) || Number(id) <= 0) {
+      return NextResponse.json({
+        message: 'กรุณาระบุ id ให้ถูกต้อง'
+      }, { status: 400 });
+    }
+
+    if (!username) {
+      return NextResponse.json({
+        message: 'กรุณาระบุ username'
+      }, { status: 400 });
+    }
+
+    let sql;
+    let values;
+
+    // ถ้าต้องการเปลี่ยนรหัสผ่านด้วย
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      sql = `UPDATE tbl_users
+             SET username = ?, password = ?
+             WHERE id = ?`;
+
+      values = [username, hashedPassword, Number(id)];
+
+    } else {
+      // แก้ไขเฉพาะ username
+      sql = `UPDATE tbl_users
+             SET username = ?
+             WHERE id = ?`;
+
+      values = [username, Number(id)];
+    }
+
+    await db.query(sql, values);
+
+    // ตรวจสอบว่ามีผู้ใช้อยู่จริงหรือไม่
+    const [users] = await db.query(
+      'SELECT id FROM tbl_users WHERE id = ?',
+      [Number(id)]
     );
-  } catch (error) {
-    return NextResponse.json(
-      {
-        success: false,
-        message: "เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์",
-        error: error instanceof Error ? error.message : "Internal Server Error",
-      },
-      { status: 500 }
-    );
+
+    if (users.length === 0) {
+      return NextResponse.json({
+        message: 'ไม่พบผู้ใช้ที่ต้องการแก้ไข'
+      }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      status: 'ok',
+      message: 'แก้ไขข้อมูลผู้ใช้สำเร็จ'
+    }, { status: 200 });
+
+  } catch (err) {
+    console.error('PUT Error:', err);
+
+    if (err.code === 'ER_DUP_ENTRY') {
+      return NextResponse.json({
+        message: 'Username นี้มีอยู่ในระบบแล้ว'
+      }, { status: 409 });
+    }
+
+    return NextResponse.json({
+      status: 'error',
+      message: 'ไม่สามารถแก้ไขข้อมูลผู้ใช้ได้'
+    }, { status: 500 });
   }
 }
